@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Flix — Your Personal Streaming Page</title>
+<meta name="color-scheme" content="light dark">
+<style>
+  :root {
+    --bg: #0f1115; --fg: #e6e6e6; --muted:#a0a6b2; --accent:#4c8bf5; --warn:#e23d3d;
+    --card:#171a21; --border:#232838;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#fff; --fg:#111; --muted:#666; --accent:#1a73e8; --warn:#b00020; --card:#fafafa; --border:#eaeaea; }
+  }
+  html,body { height:100%; margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:var(--bg); color:var(--fg); }
+  header { padding:16px; border-bottom:1px solid var(--border); display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between;}
+  .brand { font-weight:700; letter-spacing: .2px; }
+  .muted { color:var(--muted); }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap;}
+  input[type="text"], input[type="url"] { padding:10px 12px; border:1px solid var(--border); border-radius:10px; background:var(--card); color:var(--fg); min-width:220px; }
+  input::placeholder { color:var(--muted); }
+  button { padding:10px 12px; border:1px solid var(--border); border-radius:10px; background:var(--card); color:var(--fg); cursor:pointer; }
+  button.primary { background:var(--accent); color:#fff; border-color:transparent; }
+  button.warn { background:transparent; color:var(--warn); border-color:var(--warn); }
+  main { display:grid; grid-template-columns: 360px 1fr; gap:16px; padding:16px; }
+  @media (max-width: 960px) { main { grid-template-columns: 1fr; } }
+  .player { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:12px; }
+  video { width:100%; max-height:65vh; background:#000; border-radius:10px; }
+  .meta { margin-top:8px; display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(160px,1fr)); gap:12px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px; overflow:hidden; display:flex; flex-direction:column; }
+  .card img { width:100%; height:220px; object-fit:cover; background:#000; }
+  .card .title { padding:10px; font-weight:600; line-height:1.2; }
+  .card .sub { padding:0 10px 10px; color:var(--muted); font-size:.9rem; }
+  .toolbar { display:flex; gap:8px; align-items:center; margin:8px 0 16px; }
+  .pill { padding:6px 10px; border:1px solid var(--border); border-radius:999px; background:var(--card); }
+  .footer { padding:12px 16px; border-top:1px solid var(--border); color:var(--muted); text-align:center; font-size:.9rem; }
+  a { color: var(--accent); text-decoration:none; }
+  .kbd { background:var(--card); border:1px solid var(--border); padding:2px 6px; border-radius:6px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:.9em; }
+</style>
+</head>
+<body>
+  <header>
+    <div class="brand">🎬 Flix <span class="muted">— personal streaming</span></div>
+    <div class="row">
+      <input id="q" type="text" placeholder="Search library…" />
+      <button id="importRemote" title="Load playlist from a URL (JSON)">Load playlist URL</button>
+      <button id="export" title="Download current playlist as JSON">Export</button>
+      <button id="clearLocal" class="warn" title="Clear locally-saved edits">Reset local</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="player">
+      <video id="v" controls preload="metadata" playsinline></video>
+      <div class="meta">
+        <div>
+          <div id="nowTitle" style="font-weight:700;"></div>
+          <div id="nowInfo" class="muted" style="font-size:.9rem;"></div>
+        </div>
+        <div class="row">
+          <a id="openRaw" class="pill" href="#" target="_blank">Open source</a>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="toolbar">
+        <input id="title" type="text" placeholder="Title (e.g., Inception)" />
+        <input id="url" type="url" placeholder="Direct video URL (https://… .mp4 / .mov / .m3u8)" />
+        <input id="poster" type="url" placeholder="Poster image (optional)" />
+        <button id="add" class="primary">Add</button>
+      </div>
+      <div class="toolbar">
+        <span class="muted">
+          Tip: Host a playlist JSON and load it via the button above
+          or add <span class="kbd">?playlist=https://neongray777.github.io/flix/playlist.json</span> to your link.
+        </span>
+      </div>
+      <div id="grid" class="grid"></div>
+    </section>
+  </main>
+
+  <div class="footer">
+    Works best with MP4/H.264 + AAC. MOV may depend on browser codecs. HLS (.m3u8) is supported via hls.js on Chrome/Edge and natively on Safari.
+  </div>
+
+<script>
+/* Default sample items (replace with your own or load a playlist JSON) */
+const DEFAULT_PLAYLIST = [
+  {
+    title: "Sample (Big Buck Bunny, MP4)",
+    url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+    poster: "https://peach.blender.org/wp-content/uploads/title_anouncement.jpg?x11217"
+  },
+  {
+    title: "Tears of Steel (MP4)",
+    url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+    poster: "https://mango.blender.org/wp-content/uploads/2013/05/ToS_poster.png"
+  }
+];
+
+const K = {
+  LOCAL_MERGE: "flix.local.merge",
+  REMOTE_URL:  "flix.remote.url"
+};
+
+const grid = document.getElementById('grid');
+const v = document.getElementById('v');
+const nowTitle = document.getElementById('nowTitle');
+const nowInfo = document.getElementById('nowInfo');
+const openRaw = document.getElementById('openRaw');
+
+const q = document.getElementById('q');
+const titleEl = document.getElementById('title');
+const urlEl = document.getElementById('url');
+const posterEl = document.getElementById('poster');
+const addBtn = document.getElementById('add');
+const importRemoteBtn = document.getElementById('importRemote');
+const exportBtn = document.getElementById('export');
+const clearLocalBtn = document.getElementById('clearLocal');
+
+let library = [];
+let rawRemote = [];
+let localMerge = [];
+
+function saveLocalMerge() { localStorage.setItem(K.LOCAL_MERGE, JSON.stringify(localMerge)); }
+function loadLocalMerge() { try { return JSON.parse(localStorage.getItem(K.LOCAL_MERGE) || "[]"); } catch { return []; } }
+function getRemoteURLFromParams() { const u = new URL(location.href); return u.searchParams.get("playlist"); }
+
+function setNowPlaying(item) {
+  if (!item) return;
+  const isHLS = /\.m3u8($|\?)/i.test(item.url);
+  if (isHLS && !('webkitSupportsPresentationMode' in HTMLVideoElement.prototype)) {
+    loadHlsAndPlay(item.url);
+  } else if (isHLS && !v.canPlayType('application/vnd.apple.mpegURL')) {
+    loadHlsAndPlay(item.url);
+  } else {
+    v.src = item.url;
+    v.type = isHLS ? 'application/vnd.apple.mpegURL' : '';
+    v.play().catch(()=>{});
+  }
+  nowTitle.textContent = item.title || '';
+  nowInfo.textContent = item.url || '';
+  openRaw.href = item.url;
+}
+
+function loadHlsAndPlay(url) {
+  if (window.Hls) {
+    const hls = new Hls();
+    hls.loadSource(url);
+    hls.attachMedia(v);
+    hls.on(Hls.Events.MANIFEST_PARSED, function() { v.play().catch(()=>{}); });
+  } else {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/hls.js@latest';
+    s.onload = ()=> loadHlsAndPlay(url);
+    s.onerror = ()=> { v.src = url; v.play().catch(()=>{}); };
+    document.head.appendChild(s);
+  }
+}
+
+function render() {
+  const term = (q.value || '').trim().toLowerCase();
+  grid.innerHTML = '';
+  const list = library.filter(item => !term || (item.title||'').toLowerCase().includes(term));
+  for (const item of list) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    const img = document.createElement('img');
+    img.src = item.poster || '';
+    img.alt = item.title || '';
+    img.onerror = ()=> { img.style.display = 'none'; };
+    const t = document.createElement('div');
+    t.className = 'title';
+    t.textContent = item.title || '(untitled)';
+    const sub = document.createElement('div');
+    sub.className = 'sub';
+    sub.textContent = (new URL(item.url)).hostname;
+    card.appendChild(img);
+    card.appendChild(t);
+    card.appendChild(sub);
+    card.onclick = ()=> setNowPlaying(item);
+    grid.appendChild(card);
+  }
+}
+
+function recomputeLibrary() {
+  const base = rawRemote.length ? rawRemote : DEFAULT_PLAYLIST.slice();
+  library = base.concat(localMerge);
+  render();
+}
+
+addBtn.addEventListener('click', ()=>{
+  const title = titleEl.value.trim();
+  const url = urlEl.value.trim();
+  const poster = posterEl.value.trim();
+  if (!url) { alert('Enter a direct video URL.'); return; }
+  localMerge.push({ title: title || url, url, poster });
+  saveLocalMerge();
+  titleEl.value = ''; urlEl.value=''; posterEl.value='';
+  recomputeLibrary();
+});
+
+q.addEventListener('input', render);
+
+importRemoteBtn.addEventListener('click', async ()=>{
+  const current = localStorage.getItem(K.REMOTE_URL) || getRemoteURLFromParams() || 'https://neongray777.github.io/flix/playlist.json';
+  const remoteURL = prompt('Enter playlist URL (JSON array of {title,url,poster}):', current);
+  if (!remoteURL) return;
+  try {
+    const res = await fetch(remoteURL, { cache: 'no-store' });
+    const arr = await res.json();
+    if (!Array.isArray(arr)) throw new Error('JSON is not an array');
+    rawRemote = arr;
+    localStorage.setItem(K.REMOTE_URL, remoteURL);
+    recomputeLibrary();
+    alert('Loaded playlist.');
+  } catch (e) {
+    console.error(e);
+    alert('Could not load playlist. Make sure it returns valid JSON and allows public access (HTTPS).');
+  }
+});
+
+exportBtn.addEventListener('click', ()=>{
+  const data = JSON.stringify(library, null, 2);
+  const blob = new Blob([data], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'playlist.json'; a.click();
+  URL.revokeObjectURL(url);
+});
+
+clearLocalBtn.addEventListener('click', ()=>{
+  if (!confirm('Clear locally-saved additions/remote link?')) return;
+  localStorage.removeItem(K.LOCAL_MERGE);
+  localStorage.removeItem(K.REMOTE_URL);
+  localMerge = [];
+  rawRemote = [];
+  recomputeLibrary();
+});
+
+(async function init(){
+  localMerge = loadLocalMerge();
+  const remoteURL = getRemoteURLFromParams() || localStorage.getItem(K.REMOTE_URL);
+  if (remoteURL) {
+    try {
+      const res = await fetch(remoteURL, { cache: 'no-store' });
+      const arr = await res.json();
+      if (Array.isArray(arr)) rawRemote = arr;
+    } catch (e) { console.warn('Remote playlist load failed:', e); }
+  }
+  recomputeLibrary();
+  if (library.length) setNowPlaying(library[0]);
+})();
+</script>
+</body>
+</html>
